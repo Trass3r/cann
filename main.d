@@ -6,6 +6,7 @@ import std.md5;
 import std.datetime;
 import std.random;
 import std.stdio;
+import std.string;
 
 import dsfml.system.all;
 import dsfml.window.all;
@@ -96,6 +97,10 @@ void main()
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
+	
+	Text fps = new Text(""c);
+	fps.move(50.f, 50.f);
+	fps.color = Color.WHITE;
 
 	foreach(ref e; A)
 		e = uniform(0.f, sqrt(N));
@@ -112,7 +117,8 @@ void main()
 	static assert(sqrt(vx^^2 + vy^^2) <= vmax);
 
 	// Create a clock for measuring the time elapsed
-	auto clock = new StopWatch(AutoStart.yes);
+	auto fpsClock = new StopWatch(AutoStart.yes);
+	uint iFps;
 
 	while (window.isOpened())
 	{
@@ -235,6 +241,18 @@ void main()
 					glVertex3f(x+1, A[(y+1)*Nx + x+1]/max, y+1);
 				}
 		glEnd();
+
+		// show FPS
+		if(fpsClock.peek().seconds >= 1)
+		{
+			fps.text = std.string.format("%d fps", iFps);
+			iFps = 0;
+			fpsClock.reset();
+		}
+		++iFps;
+		window.saveGLStates();
+		window.draw(fps);
+		window.restoreGLStates();
 
 		window.display();
 	}
