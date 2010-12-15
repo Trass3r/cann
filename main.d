@@ -3,12 +3,16 @@ module main;
 
 import std.math;
 import std.md5;
+import std.datetime;
 import std.random;
 import std.stdio;
 
 import dsfml.system.all;
 import dsfml.window.all;
 import dsfml.graphics.all;
+
+import derelict.opengl.gl;
+import derelict.opengl.glu;
 
 enum int Nx = 10; // # Neuronen pro Zeile
 enum int Ny = cast(int) (sqrt(3)/2*Nx + 0.5); // rounded, should be 9 for Nx=10
@@ -35,10 +39,59 @@ struct Vec2(T)
 alias Vec2!float Vec2f;
 alias Vec2!int Vec2i;
 
+void reshape (int w, int h)
+{
+	glViewport(0, 0, cast(GLsizei)w, cast(GLsizei)h);
+
+	glMatrixMode (GL_PROJECTION);
+	glLoadIdentity ();
+	gluPerspective (60, cast(GLfloat)w / cast(GLfloat)h, 1.0, 1000.0);
+
+	glMatrixMode (GL_MODELVIEW);
+}
+
+//__gshared float xpos = 851.078f, ypos = 351.594f, zpos = 281.033f, xrot = 758f, yrot = 238f, angle=0.0f, cScale=1.0f;
+__gshared float xpos = 0f, ypos = 0f, zpos = 0f, xrot = 1f, yrot = 1f, angle=0.0f, cScale=0.01f;
+__gshared int lastx = 0, lasty = 0;
+
+void camera ()
+{
+//	int posX = (int)xpos;
+//	int posZ = (int)zpos;
+
+	glRotatef(xrot,1.0,0.0,0.0);
+	glRotatef(yrot,0.0,1.0,0.0);
+
+	glTranslated(-xpos,-ypos,-zpos);
+
+}
+
+static void mouseMovement(int x, int y)
+{
+
+	int diffx=x-lastx; 
+	int diffy=y-lasty; 
+	lastx=x;
+
+	lasty=y; 
+	xrot += cast(float) diffy; 
+	yrot += cast(float) diffx;
+
+}
+
 void main()
 {
-	RenderWindow window = new RenderWindow(VideoMode(1024, 768), "CANN", Style.Default, ContextSettings(24,8,0,3,1));
+	RenderWindow window = new RenderWindow(VideoMode(1024, 768), "CANN", Style.Default, ContextSettings(24,8,0,2,0));
 	
+	DerelictGL.load();
+	DerelictGLU.load();
+
+	reshape(window.width, window.height);
+	window.active = true;
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+
 	foreach(ref e; A)
 		e = uniform(0.f, sqrt(N));
 
@@ -52,7 +105,10 @@ void main()
 	enum vx = 0.02;
 	enum vy = 0;
 	static assert(sqrt(vx^^2 + vy^^2) <= vmax);
-	
+
+	// Create a clock for measuring the time elapsed
+	auto clock = new StopWatch(AutoStart.yes);
+
 	while (window.isOpened())
 	{
 		Event evt;
@@ -63,10 +119,45 @@ void main()
 			{
 				case EventType.Closed:
 					window.close();
+					break;
+				case EventType.Resized:
+					reshape(window.width, window.height);
+					break;
+				default:
 			}
 		}
 		
-		if (input.is)
+		float yrotrad = (yrot / 180 * 3.141592654f);
+		float xrotrad = (xrot / 180 * 3.141592654f);
+		
+		if (window.input.isKeyDown(KeyCode.W))
+		{
+			xpos += sin(yrotrad) * cScale;
+			zpos -= cos(yrotrad) * cScale;
+			ypos -= sin(xrotrad);
+		}
+		
+		if (window.input.isKeyDown(KeyCode.S))
+		{
+			xpos -= sin(yrotrad) * cScale;
+			zpos += cos(yrotrad) * cScale;
+			ypos += sin(xrotrad);
+		}
+
+		if (window.input.isKeyDown(KeyCode.D))
+		{
+			xpos += cos(yrotrad) * cScale;
+			zpos += sin(yrotrad) * cScale;
+		}
+
+		if (window.input.isKeyDown(KeyCode.A))
+		{
+			xpos -= cos(yrotrad) * cScale;
+			zpos -= sin(yrotrad) * cScale;
+		}
+
+		mouseMovement(window.input.mouseX, window.input.mouseY);
+
 		// one time step
 		float sumA = 0;
 		foreach(e; A)
@@ -98,6 +189,69 @@ void main()
 		}
 		
 		A = Aneu; // copy
+		
+		float max = 0;
+		foreach(e; A)
+			if (e > max)
+				max = e;
+		
+		glClearColor(0.0, 0.0, 0.0, 1.0);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		
+		glLoadIdentity();
+		camera();
+
+		glBegin(GL_TRIANGLE_STRIP);
+			for (int x=0; x<Nx-1; x++)
+				for (int y=0; y<Ny-1; y++)
+				{
+					glColor3f(1f, 1f, 1f);
+					glVertex3f(x,   A[y*Nx + x], y);
+					glVertex3f(x,   A[(y+1)*Nx + x], y+1);
+					glVertex3f(x+1, A[y*Nx + x+1], y);
+					glVertex3f(x+1, A[(y+1)*Nx + x+1], y+1);
+				}
+		glEnd();
+
+
+		glBegin(GL_QUADS);
+			glColor3f(1, 0,   0  );   // Ab jetzt werden alle gezeichneten Punkte rot
+		      glVertex3f( 1,  1, -1);
+		      glVertex3f( 1, -1, -1);
+		      glVertex3f(-1, -1, -1);
+		      glVertex3f(-1,  1, -1);
+
+		    glColor3f(0, 1,   0  );   // Ab jetzt werden alle gezeichneten Punkte grün
+		      glVertex3f( 1,  1,  1);
+		      glVertex3f(-1,  1,  1);
+		      glVertex3f(-1, -1,  1);
+		      glVertex3f( 1, -1,  1);
+
+		    glColor3f(0, 0,   1  );
+		      glVertex3f( 1,  1, -1);
+		      glVertex3f( 1,  1,  1);
+		      glVertex3f( 1, -1,  1);
+		      glVertex3f( 1, -1, -1);
+
+		    glColor3f(1, 1,   0  );
+		      glVertex3f( 1, -1, -1);
+		      glVertex3f( 1, -1,  1);
+		      glVertex3f(-1, -1,  1);
+		      glVertex3f(-1, -1, -1);
+
+		    glColor3f(0, 0.5, 1  );
+		      glVertex3f(-1, -1, -1);
+		      glVertex3f(-1, -1,  1);
+		      glVertex3f(-1,  1,  1);
+		      glVertex3f(-1,  1, -1);
+
+		    glColor3f(1, 0.1, 0.8);
+		      glVertex3f( 1,  1,  1);
+		      glVertex3f( 1,  1, -1);
+		      glVertex3f(-1,  1, -1);
+		      glVertex3f(-1,  1,  1);
+		glEnd();
+		window.display();
 	}
 	writeln("done");
 	visualize();
