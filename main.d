@@ -82,10 +82,18 @@ static void mouseMovement(int x, int y)
 
 }
 
+__gshared float max = 0;
+enum gain = 2; // element of [1,3]
+enum bias = 0; // element of  [0, pi/3]
+enum vmax = 0.0275f; // meter / Zeitschritt
+enum vx = 0.02;
+enum vy = 0.01;
+static assert(sqrt(vx^^2 + vy^^2) <= vmax);
+__gshared float[N] Aneu = void;
+
 void main()
 {
 	bool updateValues = true;
-	float max = 0;
 	
 	RenderWindow window = new RenderWindow(VideoMode(1024, 768), "CANN", Style.Default, ContextSettings(24,8,0,2,0));
 	
@@ -104,17 +112,6 @@ void main()
 
 	foreach(ref e; A)
 		e = uniform(0.f, sqrt(N));
-
-	visualize();
-
-	float[N] Aneu = void;
-
-	enum gain = 2; // element of [1,3]
-	enum bias = 0; // element of  [0, pi/3]
-	enum vmax = 0.0275f; // meter / Zeitschritt
-	enum vx = 0.02;
-	enum vy = 0;
-	static assert(sqrt(vx^^2 + vy^^2) <= vmax);
 
 	// Create a clock for measuring the time elapsed
 	auto fpsClock = new StopWatch(AutoStart.yes);
@@ -175,72 +172,10 @@ void main()
 		mouseMovement(window.input.mouseX, window.input.mouseY);
 
 		if (updateValues)
-		{
-			// one time step
-			float sumA = 0;
-			foreach(e; A)
-				sumA += e;
+			updateNetwork();
 		
-			for(int i=0; i<N; i++)
-			{
-				auto veci = idx2vec(i);
-				int ix = i % Nx; // Spaltennummer
-				int iy = i / Nx; // Zeilennummer
-	
-				
-				// Berechne B
-				float tmp = 0;
-				for(int j=0; j<N; j++)
-				{
-					auto vecj = idx2vec(j);
-					int jx = j % Nx;
-					int jy = j / Nx;
-	
-					float d = distTriSqr( (jx - ix) / cast(float)Nx  + gain * (cos(bias)*vx -sin(bias) + vy), sqr32 * (jy - iy) / cast(float) Ny  + gain * (sin(bias)*vx + cos(bias)*vy));
-					tmp += A[j] * ( I * exp( -(d)/(sigma^^2) ) - T );
-				}
-				
-				// Berechne A
-				Aneu[i] = (1-tau)*tmp + tau*(tmp/(sumA));
-				if (Aneu[i] < 0)
-					Aneu[i] = 0;
-			}
-			
-			A = Aneu; // copy
-			
-			max = 0;
-			foreach(e; A)
-				if (e > max)
-					max = e;
-		}
-		
-		glClearColor(0.0, 0.0, 0.0, 1.0);
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		
-		glLoadIdentity();
-		camera();
-
-		glBegin(GL_TRIANGLE_STRIP);
-			for (int x=0; x<Nx-1; x++)
-				for (int y=0; y<Ny-1; y++)
-				{
-					Color c = jet[cast(size_t) (A[y*Nx + x]/max * 1023)];
-					glColor3f(c.r, c.g, c.b);
-					glVertex3f(x,   A[y*Nx + x]/max, y);
-
-					c = jet[cast(size_t) (A[(y+1)*Nx + x]/max * 1023)];
-					glColor3f(c.r, c.g, c.b);
-					glVertex3f(x,   A[(y+1)*Nx + x]/max, y+1);
-
-					c = jet[cast(size_t) (A[y*Nx + x+1]/max * 1023)];
-					glColor3f(c.r, c.g, c.b);
-					glVertex3f(x+1, A[y*Nx + x+1]/max, y);
-
-					c = jet[cast(size_t) (A[(y+1)*Nx + x+1]/max * 1023)];
-					glColor3f(c.r, c.g, c.b);
-					glVertex3f(x+1, A[(y+1)*Nx + x+1]/max, y+1);
-				}
-		glEnd();
+		// render the network
+		render();
 
 		// show FPS
 		if(fpsClock.peek().seconds >= 1)
@@ -260,9 +195,42 @@ void main()
 	visualize();
 }
 
-Vec2i idx2vec(int i)
+void updateNetwork()
 {
-	return Vec2i(i % Nx, i / Nx); // Spalten- und Zeilennummer resp.
+	// one time step
+	float sumA = 0;
+	foreach(e; A)
+		sumA += e;
+
+	for(int i=0; i<N; i++)
+	{
+		int ix = i % Nx; // Spaltennummer
+		int iy = i / Nx; // Zeilennummer
+
+		
+		// Berechne B
+		float tmp = 0;
+		for(int j=0; j<N; j++)
+		{
+			int jx = j % Nx;
+			int jy = j / Nx;
+
+			float d = distTriSqr( (jx - ix) / cast(float)Nx  + gain * (cos(bias)*vx -sin(bias) + vy), sqr32 * (jy - iy) / cast(float) Ny  + gain * (sin(bias)*vx + cos(bias)*vy));
+			tmp += A[j] * ( I * exp( -(d)/(sigma^^2) ) - T );
+		}
+		
+		// Berechne A
+		Aneu[i] = (1-tau)*tmp + tau*(tmp/(sumA));
+		if (Aneu[i] < 0)
+			Aneu[i] = 0;
+	}
+	
+	A = Aneu; // copy
+	
+	max = 0;
+	foreach(e; A)
+		if (e > max)
+			max = e;
 }
 
 float distTriSqr(float dx, float dy)
@@ -289,6 +257,37 @@ float distTriSqr(float dx, float dy)
 		res = tmp;
 	
 	return res;
+}
+
+void render()
+{
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	
+	glLoadIdentity();
+	camera();
+
+	glBegin(GL_TRIANGLE_STRIP);
+		for (int x=0; x<Nx-1; x++)
+			for (int y=0; y<Ny-1; y++)
+			{
+				Color c = jet[cast(size_t) (A[y*Nx + x]/max * 1023)];
+				glColor3f(c.r, c.g, c.b);
+				glVertex3f(x,   A[y*Nx + x]/max, y);
+
+				c = jet[cast(size_t) (A[(y+1)*Nx + x]/max * 1023)];
+				glColor3f(c.r, c.g, c.b);
+				glVertex3f(x,   A[(y+1)*Nx + x]/max, y+1);
+
+				c = jet[cast(size_t) (A[y*Nx + x+1]/max * 1023)];
+				glColor3f(c.r, c.g, c.b);
+				glVertex3f(x+1, A[y*Nx + x+1]/max, y);
+
+				c = jet[cast(size_t) (A[(y+1)*Nx + x+1]/max * 1023)];
+				glColor3f(c.r, c.g, c.b);
+				glVertex3f(x+1, A[(y+1)*Nx + x+1]/max, y+1);
+			}
+	glEnd();
 }
 
 void visualize()
